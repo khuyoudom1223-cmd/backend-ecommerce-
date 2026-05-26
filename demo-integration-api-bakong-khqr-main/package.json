@@ -1,0 +1,46 @@
+{
+  "name": "bakong-open-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon server.js",
+    "test": "jest --detectOpenHandles --forceExit"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "This is the backend service for the Store App. It provides APIs for managing products, orders, and generating **KHQR** codes for checkout.",
+  "dependencies": {
+    "axios": "^1.13.1",
+    "bakong-khqr": "^1.0.20",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "joi": "^18.0.1",
+    "mongodb": "^6.19.0",
+    "mongoose": "^8.18.0",
+    "morgan": "^1.10.1",
+    "nodemon": "^3.1.10",
+    "qr": "^0.6.0",
+    "qrcode": "^1.5.4",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "mongodb-memory-server": "^10.2.0",
+    "supertest": "^7.1.4"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Leap-Chanvuthy/bakong-open-api.git"
+  },
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/Leap-Chanvuthy/bakong-open-api/issues"
+  },
+  "homepage": "https://github.com/Leap-Chanvuthy/bakong-open-api#readme"
+}
