@@ -124,11 +124,20 @@ router.post('/deposit', protect, asyncHandler(async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────
 // @desc    Check Bakong KHQR payment status and credit wallet
-// @route   GET /api/wallet/check-payment/:transactionId
+// @route   GET /api/wallet/check-payment/:transactionId?
 // @access  Private (Validates transaction ownership)
 // ─────────────────────────────────────────────────────────────────
-router.get('/check-payment/:transactionId', protect, asyncHandler(async (req, res) => {
-  const { transactionId } = req.params;
+router.get('/check-payment/:transactionId?', protect, asyncHandler(async (req, res) => {
+  // Support both route parameter and query parameter for transactionId
+  const transactionId = req.params.transactionId || req.query.transactionId;
+
+  if (!transactionId) {
+    return res.status(400).json({
+      success: false,
+      status: 'Failed',
+      message: 'Missing transactionId parameter'
+    });
+  }
 
   // ── 1. Find the transaction in MongoDB ──────────────────────
   const txn = await TbTransaction.findOne({ transactionId });
@@ -149,13 +158,13 @@ router.get('/check-payment/:transactionId', protect, asyncHandler(async (req, re
     });
   }
 
-  // ── 3. If already Paid → return immediately (idempotency) ──
+  // ── 3. CRITICAL: If already Paid → return immediately (idempotency & prevent rollback)
   if (txn.status === 'Paid') {
     const user = await User.findById(txn.userId).select('balance');
     return res.json({
       success: true,
       status: 'Paid',
-      message: 'Payment already processed',
+      message: 'Payment successful',
       balance: user ? user.balance : 0
     });
   }
@@ -199,8 +208,8 @@ router.get('/check-payment/:transactionId', protect, asyncHandler(async (req, re
     }
   }
 
+  // ── 7. If still pending, return Pending (never change status of Paid to Pending) ──
   if (!isPaid) {
-    // Payment not yet completed at Bakong
     return res.json({
       success: false,
       status: 'Pending',
@@ -208,14 +217,18 @@ router.get('/check-payment/:transactionId', protect, asyncHandler(async (req, re
     });
   }
 
-  // ── 7. Payment confirmed! Use atomic session to prevent race conditions ──
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // ── 8. Payment confirmed! Use session/transaction if supported, with atomic fallback ──
+  let lockedTxn = null;
+  let updatedUser = null;
+  let session = null;
 
   try {
-    // Re-fetch inside session with lock to prevent double processing
-    const lockedTxn = await TbTransaction.findOneAndUpdate(
-      { transactionId, status: 'Pending' },  // Only update if still Pending
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Re-fetch inside session with lock to prevent double processing (ONLY update if still Pending)
+    lockedTxn = await TbTransaction.findOneAndUpdate(
+      { transactionId, status: 'Pending' },
       {
         status: 'Paid',
         bakongTransactionId: bakongResult.data.hash || bakongResult.data.transactionId || '',
@@ -226,48 +239,70 @@ router.get('/check-payment/:transactionId', protect, asyncHandler(async (req, re
       { new: true, session }
     );
 
-    // If lockedTxn is null, another process already updated it (race condition guard)
-    if (!lockedTxn) {
-      await session.abortTransaction();
-      session.endSession();
-
-      const user = await User.findById(txn.userId).select('balance');
-      return res.json({
-        success: true,
-        status: 'Paid',
-        message: 'Payment already processed (concurrent)',
-        balance: user ? user.balance : 0
-      });
+    if (lockedTxn) {
+      // Credit user balance atomically inside session (ONCE only)
+      updatedUser = await User.findByIdAndUpdate(
+        lockedTxn.userId,
+        { $inc: { balance: lockedTxn.amount } },
+        { new: true, session }
+      );
     }
 
-    // ── 8. Credit user balance atomically (ONCE only) ─────────
-    const updatedUser = await User.findByIdAndUpdate(
-      lockedTxn.userId,
-      { $inc: { balance: lockedTxn.amount } },
-      { new: true, session }
+    await session.commitTransaction();
+  } catch (sessionErr) {
+    if (session) {
+      try {
+        await session.abortTransaction();
+      } catch (abortErr) {}
+    }
+    console.warn('⚠️ [Session Transaction Not Supported/Failed] Using atomic single-document locks:', sessionErr.message);
+
+    // Fail-safe fall back: Atomic single-document update (works on local standalone MongoDB without replica sets)
+    lockedTxn = await TbTransaction.findOneAndUpdate(
+      { transactionId, status: 'Pending' },
+      {
+        status: 'Paid',
+        bakongTransactionId: bakongResult.data.hash || bakongResult.data.transactionId || '',
+        paymentReference: bakongResult.data.paymentRef || bakongResult.data.externalRef || transactionId,
+        bakongResponse: bakongResult,
+        paidAt: new Date()
+      },
+      { new: true }
     );
 
-    await session.commitTransaction();
-    session.endSession();
+    if (lockedTxn) {
+      // Credit user balance atomically (ONCE only)
+      updatedUser = await User.findByIdAndUpdate(
+        lockedTxn.userId,
+        { $inc: { balance: lockedTxn.amount } },
+        { new: true }
+      );
+    }
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
 
-    console.log(`🎉 [BAKONG WALLET PAID] Txn ${transactionId} → User ${lockedTxn.userId} credited $${lockedTxn.amount}. New balance: $${updatedUser.balance}`);
-
+  // ── 9. If lockedTxn is null, another process already updated it (race condition guard) ──
+  if (!lockedTxn) {
+    const user = await User.findById(txn.userId).select('balance');
     return res.json({
       success: true,
       status: 'Paid',
       message: 'Payment successful',
-      balance: updatedUser.balance
-    });
-  } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error('❌ [Wallet Atomic Update Failed]', err.message);
-    return res.status(500).json({
-      success: false,
-      status: 'Failed',
-      message: 'Internal error during payment processing'
+      balance: user ? user.balance : 0
     });
   }
+
+  console.log(`🎉 [BAKONG WALLET PAID] Txn ${transactionId} → User ${lockedTxn.userId} credited $${lockedTxn.amount}. New balance: $${updatedUser.balance}`);
+
+  return res.json({
+    success: true,
+    status: 'Paid',
+    message: 'Payment successful',
+    balance: updatedUser.balance
+  });
 }));
 
 export default router;
