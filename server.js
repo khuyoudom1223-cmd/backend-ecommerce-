@@ -14,6 +14,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Request logger middleware
+app.use((req, res, next) => {
+  console.log(`📡 [${req.method}] ${req.url} - Body:`, req.body);
+  next();
+});
+
 // Connect to MongoDB
 await connectDB();
 

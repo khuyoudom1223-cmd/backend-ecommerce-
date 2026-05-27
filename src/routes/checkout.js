@@ -58,7 +58,7 @@ router.post('/', asyncHandler(async (req, res) => {
     note: note || ''
   });
 
-  return success(res, {
+  return res.status(201).json({
     success: true,
     message: 'Order created successfully',
     order: {
@@ -77,7 +77,7 @@ router.post('/', asyncHandler(async (req, res) => {
       delivery_address: order.delivery_address,
       note: order.note
     }
-  }, 201);
+  });
 }));
 
 export default router;
