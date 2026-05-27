@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
       enum: ['Admin', 'User', 'Vendor'],
       default: 'User'
     },
+    balance: { type: Number, default: 0, min: 0 },
     // additional fields (address, phone) can be added here
   },
   { timestamps: true }
