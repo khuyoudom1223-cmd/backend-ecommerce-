@@ -74,14 +74,23 @@ router.post('/generate-qr', asyncHandler(async (req, res) => {
   let md5Hash = '';
 
   try {
-    // 3. Generate OFFICIAL Bakong EMVCo-compliant individual KHQR
+    const expirationTimestamp = Date.now() + 5 * 60 * 1000;
+    
+    // 3. Generate OFFICIAL Bakong EMVCo-compliant individual KHQR using optionalData structure
+    const optionalData = {
+      currency: khqrData.currency.usd,
+      amount: parseFloat(totalAmount),
+      billNumber: `ORD-${Date.now().toString().slice(-6)}`,
+      storeLabel: "SleekCart",
+      terminalLabel: "Online Checkout",
+      expirationTimestamp
+    };
+
     const individualInfo = new IndividualInfo(
       merchantId,
       merchantName,
       "Phnom Penh",
-      `Order Variant ${size || 'N/A'}-${color || 'N/A'}`,
-      khqrData.currency.usd,
-      totalAmount
+      optionalData
     );
 
     const khqr = new BakongKHQR();

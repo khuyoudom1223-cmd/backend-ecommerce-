@@ -23,7 +23,7 @@ function getBakongConfig() {
   };
 }
 
-// ─── Helper: Call Bakong Verification API ───────────────────────
+// ─── Helper: Call Bakong Verification API (Uses UNDERSCORE endpoint) ───
 async function verifyWithBakong(md5Hash) {
   const { baseUrl, token } = getBakongConfig();
   if (!token) {
@@ -32,8 +32,9 @@ async function verifyWithBakong(md5Hash) {
   }
 
   try {
+    console.log(`📡 [BAKONG VERIFY] Calling /check_transaction_by_md5 with MD5: ${md5Hash}...`);
     const response = await axios.post(
-      `${baseUrl}/check-transaction-by-md5`,
+      `${baseUrl}/check_transaction_by_md5`,
       { md5: md5Hash },
       {
         headers: {
@@ -45,13 +46,13 @@ async function verifyWithBakong(md5Hash) {
     );
     return response.data;
   } catch (err) {
-    console.error('⚠️ [Bakong API Error]', err.message);
+    console.error('⚠️ [Bakong API Error]', err.response?.data || err.message);
     return null;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// @desc    Initiate Wallet Top-Up via Bakong KHQR
+// @desc    Initiate Wallet Top-Up via Bakong KHQR (Uses correct SDK constructor)
 // @route   POST /api/wallet/deposit
 // @access  Private
 // ─────────────────────────────────────────────────────────────────
@@ -72,14 +73,23 @@ router.post('/deposit', protect, asyncHandler(async (req, res) => {
   let md5Hash = '';
 
   try {
-    // Generate official scannable Bakong KHQR
+    const expirationTimestamp = Date.now() + 5 * 60 * 1000; 
+    
+    // Pass config as the 4th optionalData parameter according to the official SDK template
+    const optionalData = {
+      currency: khqrData.currency.usd,
+      amount: parseFloat(amount),
+      billNumber: transactionId,
+      storeLabel: "SleekCart",
+      terminalLabel: "Online Payment",
+      expirationTimestamp
+    };
+
     const individualInfo = new IndividualInfo(
       merchantId,
       merchantName,
       "Phnom Penh",
-      `Wallet TopUp ${transactionId.slice(-6)}`,
-      khqrData.currency.usd,
-      amount
+      optionalData
     );
 
     const khqr = new BakongKHQR();
@@ -89,7 +99,7 @@ router.post('/deposit', protect, asyncHandler(async (req, res) => {
       qrString = khqrResponse.data.qr;
       md5Hash = khqrResponse.data.md5;
     } else {
-      throw new Error("Bakong KHQR generation returned code non-zero");
+      throw new Error(`Bakong SDK returned invalid response: ${JSON.stringify(khqrResponse)}`);
     }
   } catch (sdkErr) {
     console.error("⚠️ [Bakong SDK Error in Deposit] Falling back to robust generator:", sdkErr.message);
@@ -181,10 +191,11 @@ router.get('/check-payment/:transactionId?', protect, asyncHandler(async (req, r
   // ── 5. Status is Pending → call Bakong Verification API ────
   let bakongResult = await verifyWithBakong(txn.md5);
 
-  // Check if Bakong confirms the payment (responseCode 0 = success)
+  // Check if Bakong confirms the payment (responseCode 0 = success, presence of data.hash confirms execution)
   let isPaid = bakongResult
     && bakongResult.responseCode === 0
-    && bakongResult.data;
+    && bakongResult.data
+    && !!bakongResult.data.toAccountId; // As per template: must have toAccountId to be considered successfully paid
 
   // ── 6. Fallback Simulation for UAT / Local Developer Testing ──
   if (!isPaid) {
@@ -202,7 +213,8 @@ router.get('/check-payment/:transactionId?', protect, asyncHandler(async (req, r
           hash: "mock_bakong_hash_" + Math.random().toString(36).substring(7).toUpperCase(),
           amount: txn.amount,
           currency: "USD",
-          externalRef: transactionId
+          externalRef: transactionId,
+          toAccountId: "soklin_chen@bkrt"
         }
       };
     }

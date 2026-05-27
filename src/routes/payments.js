@@ -35,7 +35,7 @@ router.get('/status/:orderId', asyncHandler(async (req, res) => {
     try {
       console.log(`📡 [BAKONG POLL] Requesting NBC Bakong API for MD5: ${md5Hash}...`);
       
-      const response = await fetch(`${baseApiUrl}/check-transaction-by-md5`, {
+      const response = await fetch(`${baseApiUrl}/check_transaction_by_md5`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
