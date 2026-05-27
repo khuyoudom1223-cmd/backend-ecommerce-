@@ -1,0 +1,14 @@
+# Railway deployment configuration for Node.js backend
+# This file is automatically detected by Railway.
+# The `buildCommand` runs npm install (and any build steps you may add).
+# The `startCommand` starts the server.
+# Adjust `PORT` if you expose a different port.
+
+services:
+  - type: web
+    name: ecommerce-backend
+    env: node
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeploy: true
