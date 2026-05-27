@@ -31,7 +31,7 @@ import walletRouter from './src/routes/wallet.js';
 import paymentRouter from './src/routes/payments.js';
 import orderRouter from './src/routes/orders.js';
 import checkoutRouter from './src/routes/checkout.js';
-import abaRouter from './src/routes/aba.js';
+import bakongRouter from './src/routes/bakong.js';
 
 app.use('/api/auth', authRouter);
 app.use('/api/users', userRouter);
@@ -40,7 +40,7 @@ app.use('/api/wallet', walletRouter);
 app.use('/api/payments', paymentRouter);
 app.use('/api/orders', orderRouter);
 app.use('/api/checkout', checkoutRouter);
-app.use('/api/wallet', abaRouter);  // Bakong KHQR check-payment
+app.use('/api/wallet', bakongRouter);  // Bakong KHQR check-payment
 
 // Simple health check endpoint
 app.get('/api/health', (req, res) => res.json({ success: true, message: 'API is up' }));
