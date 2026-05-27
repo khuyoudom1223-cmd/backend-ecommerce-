@@ -1,39 +1,11 @@
 import express from 'express';
 import asyncHandler from 'express-async-handler';
 import Order from '../models/Order.js';
+import Transaction from '../models/Transaction.js';
+import { PRODUCT_DB, paymentSessions } from './checkout.js';
 import { success, error } from '../utils/response.js';
 
 const router = express.Router();
-
-// Store payment initiation times in memory to simulate Bakong payment processing
-const paymentSessions = new Map();
-
-// @desc    Generate Bakong KHQR payload
-// @route   POST /api/payments/khqr
-// @access  Public
-router.post('/khqr', asyncHandler(async (req, res) => {
-  const { order_id, amount, customer_name } = req.body;
-
-  if (!order_id) {
-    return error(res, 400, 'Order ID is required to generate payment');
-  }
-
-  // Create an EMVCo compliant KHQR mock string
-  // Format based on standard EMVCo specifications for Bakong KHQR
-  const mockKHQRString = `000201010212373000160123456789ABCDEF0208123456785204599953038405802KH5912${encodeURIComponent(customer_name || 'Bakong Customer')}6010Phnom Penh6304` + Math.random().toString(36).substring(7).toUpperCase();
-
-  // Save transaction session timestamp
-  paymentSessions.set(order_id.toString(), Date.now());
-
-  return res.json({
-    success: true,
-    order_id,
-    khqr: {
-      qr_string: mockKHQRString,
-      qr_image_url: null // Frontend will auto-convert qr_string to a gorgeous 2D barcode dynamically
-    }
-  });
-}));
 
 // @desc    Poll status of KHQR payment
 // @route   GET /api/payments/status/:orderId
@@ -51,17 +23,35 @@ router.get('/status/:orderId', asyncHandler(async (req, res) => {
     return res.json({ paid: true });
   }
 
-  // Check if this order was recently initiated for payment
-  const startTime = paymentSessions.get(orderId.toString());
-  if (startTime) {
-    const secondsElapsed = (Date.now() - startTime) / 1000;
+  // Check in-memory payment session
+  const session = paymentSessions.get(orderId.toString());
+  if (session) {
+    const secondsElapsed = (Date.now() - session.startTime) / 1000;
     
     // Simulate a successful payment after 8 seconds of scanning!
     if (secondsElapsed >= 8) {
+      // 1. Update Order Status to Paid
       order.status = 'Paid';
       await order.save();
-      paymentSessions.delete(orderId.toString()); // clean up memory
-      console.log(`🎉 Payment simulation successful for Order ${orderId}! Marked as Paid in MongoDB.`);
+
+      // 2. Reduce Product Stock
+      const { productId, quantity, transactionId } = session;
+      if (PRODUCT_DB[productId]) {
+        const originalStock = PRODUCT_DB[productId].stock;
+        PRODUCT_DB[productId].stock = Math.max(0, PRODUCT_DB[productId].stock - quantity);
+        console.log(`📉 Stock Reduced for Product ${productId}: ${originalStock} ➡️ ${PRODUCT_DB[productId].stock}`);
+      }
+
+      // 3. Update Transaction History Status to Completed
+      if (transactionId) {
+        await Transaction.findByIdAndUpdate(transactionId, { status: 'Completed' });
+        console.log(`💼 Transaction ${transactionId} updated to Completed.`);
+      }
+
+      // Clean up payment session
+      paymentSessions.delete(orderId.toString());
+
+      console.log(`🎉 [PAYMENT SUCCESS] Order ${orderId} marked as Paid. Transaction Completed. Stock Reduced.`);
       return res.json({ paid: true });
     }
   }
